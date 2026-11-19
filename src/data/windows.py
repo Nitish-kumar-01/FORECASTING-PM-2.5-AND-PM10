@@ -92,27 +92,45 @@ class StationScaler:
     def inverse_transform_targets(self, y_scaled: np.ndarray) -> np.ndarray:
         """
         Inverts scaled target forecasts back to physical concentration units (ug/m3).
-        Supports shapes (N, horizon, n_targets) or (N, horizon, n_targets, n_quantiles).
+        Supports shapes:
+          - (H, n_targets, n_quantiles)
+          - (N, H, n_targets)
+          - (N, H, n_targets, n_quantiles)
+          - (N, n_targets) or (H, n_targets)
         """
         if not self.is_fitted:
             raise RuntimeError("StationScaler must be fitted before inverse transform.")
 
         y_out = np.copy(y_scaled)
+        n_targets = len(self.target_cols)
+
         for i, target in enumerate(self.target_cols):
             m = self.mean_.get(target, 0.0)
             s = self.std_.get(target, 1.0)
             
-            # Select target slice
-            if y_out.ndim == 3:
+            # Select target slice based on shape
+            if y_out.ndim == 3 and y_out.shape[1] == n_targets:
+                # Shape: (horizon, n_targets, n_quantiles)
+                y_out[:, i, :] = y_out[:, i, :] * s + m
+                if target in self.log_cols_:
+                    y_out[:, i, :] = np.expm1(y_out[:, i, :])
+            elif y_out.ndim == 3 and y_out.shape[2] == n_targets:
                 # Shape: (N, horizon, n_targets)
                 y_out[:, :, i] = y_out[:, :, i] * s + m
                 if target in self.log_cols_:
                     y_out[:, :, i] = np.expm1(y_out[:, :, i])
-            elif y_out.ndim == 4:
+            elif y_out.ndim == 4 and y_out.shape[2] == n_targets:
                 # Shape: (N, horizon, n_targets, n_quantiles)
                 y_out[:, :, i, :] = y_out[:, :, i, :] * s + m
                 if target in self.log_cols_:
                     y_out[:, :, i, :] = np.expm1(y_out[:, :, i, :])
+            elif y_out.ndim == 2 and y_out.shape[1] == n_targets:
+                # Shape: (N, n_targets)
+                y_out[:, i] = y_out[:, i] * s + m
+                if target in self.log_cols_:
+                    y_out[:, i] = np.expm1(y_out[:, i])
+            else:
+                raise ValueError(f"Unexpected shape {y_out.shape} for inverse_transform_targets with {n_targets} targets")
 
         # Physical concentrations must be strictly non-negative
         return np.maximum(0.0, y_out)

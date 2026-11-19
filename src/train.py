@@ -10,7 +10,13 @@ Implements PRD Section 7.8 and FR-16:
 from datetime import datetime
 import logging
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 import torch
@@ -248,3 +254,164 @@ def load_model_package(
     model.eval()
 
     return model, package
+
+
+def train_from_data_dir(
+    raw_dir: Union[str, Path] = "data/raw",
+    epochs: int = 20,
+    batch_size: int = 32,
+    learning_rate: float = 1e-3,
+    output_package_path: Union[str, Path] = "models/model_package.pt",
+) -> Path:
+    """
+    CLI / Script pipeline to train model from all station files in raw_dir.
+    """
+    from src.data.fetch import load_all_stations
+    from src.data.clean import run_cleaning_pipeline
+    from src.data.features import engineer_station_features, get_model_feature_columns
+    from src.data.windows import StationScaler, chronological_split, create_sliding_windows
+
+    raw_path = Path(raw_dir)
+    cfg = load_config()
+
+    stations = load_all_stations(raw_path)
+    if not stations:
+        raise ValueError(f"No station data files found in '{raw_path}'. Place .xlsx/.csv files there first.")
+
+    logger.info(f"Loaded {len(stations)} station(s) for training: {list(stations.keys())}")
+
+    station_mapping = {name: idx for idx, name in enumerate(stations.keys())}
+    scalers = {}
+    train_x_list, train_stn_list, train_y_list = [], [], []
+    val_x_list, val_stn_list, val_y_list = [], [], []
+    status_table = []
+    feat_cols = []
+
+    for stn_name, df_raw in stations.items():
+        logger.info(f"Processing station: {stn_name} ({len(df_raw)} records)...")
+        df_clean, _ = run_cleaning_pipeline(df_raw, config=cfg)
+        stn_id = station_mapping[stn_name]
+        df_feat = engineer_station_features(df_clean, station_id=stn_id, config=cfg)
+        feat_cols = get_model_feature_columns(df_feat)
+
+        train_df, val_df, _ = chronological_split(
+            df_feat,
+            buffer_hours=12 if len(df_feat) < 1000 else 72,
+        )
+
+        scaler = StationScaler(target_cols=["PM2.5", "PM10"])
+        train_scaled = scaler.fit_transform(train_df)
+        val_scaled = scaler.transform(val_df)
+        scalers[stn_name] = scaler
+
+        X_tr, S_tr, Y_tr = create_sliding_windows(train_scaled, feat_cols, stride=2 if len(train_scaled) < 1000 else 1, station_id=stn_id)
+        X_va, S_val, Y_val = create_sliding_windows(val_scaled, feat_cols, stride=4, station_id=stn_id)
+
+        if len(X_tr) > 0:
+            train_x_list.append(X_tr)
+            train_stn_list.append(S_tr)
+            train_y_list.append(Y_tr)
+        if len(X_va) > 0:
+            val_x_list.append(X_va)
+            val_stn_list.append(S_val)
+            val_y_list.append(Y_val)
+
+        status_table.append({
+            "station": stn_name,
+            "training_date": datetime.now().strftime("%Y-%m-%d"),
+            "data_range": f"{df_raw.index.min().strftime('%Y-%m-%d')} to {df_raw.index.max().strftime('%Y-%m-%d')}",
+            "days_used": round((df_raw.index.max() - df_raw.index.min()).total_seconds() / 86400.0, 1),
+            "status": "Approved" if len(df_raw) > 5000 else "Warning (Sample)",
+        })
+
+    X_train = np.concatenate(train_x_list, axis=0)
+    S_train = np.concatenate(train_stn_list, axis=0)
+    Y_train = np.concatenate(train_y_list, axis=0)
+
+    X_val = np.concatenate(val_x_list, axis=0) if val_x_list else X_train[:10]
+    S_val = np.concatenate(val_stn_list, axis=0) if val_stn_list else S_train[:10]
+    Y_val = np.concatenate(val_y_list, axis=0) if val_y_list else Y_train[:10]
+
+    train_ds = TensorDataset(
+        torch.tensor(X_train, dtype=torch.float32),
+        torch.tensor(S_train, dtype=torch.long),
+        torch.tensor(Y_train, dtype=torch.float32),
+    )
+    val_ds = TensorDataset(
+        torch.tensor(X_val, dtype=torch.float32),
+        torch.tensor(S_val, dtype=torch.long),
+        torch.tensor(Y_val, dtype=torch.float32),
+    )
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
+    device = get_default_device()
+    logger.info(f"Using compute device: {device}")
+
+    model_inst = MultiStationLSTMForecaster(
+        in_features=len(feat_cols),
+        num_stations=max(16, len(station_mapping)),
+        embedding_dim=8,
+        conv_filters=32,
+        bilstm_hidden=32,
+        lstm_hidden=32,
+        dropout=0.2,
+        horizon=72,
+        num_targets=2,
+        quantiles=[0.10, 0.50, 0.90],
+        use_attention=True,
+    ).to(device)
+
+    logger.info(f"Training neural model for {epochs} epochs...")
+    trained_model, history = train_single_model(
+        model_inst,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_epochs=epochs,
+        learning_rate=learning_rate,
+        patience=8,
+        device=device,
+    )
+
+    # Conformal calibration on val
+    with torch.no_grad():
+        q_val_pred, _ = trained_model(torch.tensor(X_val, dtype=torch.float32).to(device), torch.tensor(S_val, dtype=torch.long).to(device))
+        q_val_np = q_val_pred.cpu().numpy()
+    alpha = calibrate_conformal_multiplier(Y_val, q_val_np, target_coverage=0.80)
+
+    # Save Package
+    out_pkg = save_model_package(
+        model=trained_model,
+        scalers=scalers,
+        station_mapping=station_mapping,
+        feature_names=feat_cols,
+        target_names=["PM2.5", "PM10"],
+        conformal_alpha=alpha,
+        metrics={"final_val_loss": history["val_loss"][-1]},
+        config=cfg,
+        output_path=output_package_path,
+        status_table=status_table,
+    )
+    logger.info(f"Model training successfully completed! Package saved to: {out_pkg}")
+    return out_pkg
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train Multi-Station LSTM Air Quality Forecaster.")
+    parser.add_argument("--data-dir", type=str, default="data/raw", help="Directory containing station files.")
+    parser.add_argument("--epochs", type=int, default=15, help="Number of training epochs.")
+    parser.add_argument("--batch-size", type=int, default=32, help="Mini-batch size.")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate.")
+    parser.add_argument("--output", type=str, default="models/model_package.pt", help="Output package path.")
+    args = parser.parse_args()
+
+    train_from_data_dir(
+        raw_dir=args.data_dir,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        output_package_path=args.output,
+    )
+

@@ -1,0 +1,140 @@
+# Configuration for PM2.5 and PM10 Multi-Station Forecasting (Korba)
+# Based on PRD Version 2.0
+
+project:
+  name: "pm_forecast_korba"
+  version: "1.0.0"
+  random_seed: 42
+  seeds: [42, 101, 202, 303, 404]
+  device: "auto"  # "cuda", "mps", "cpu", or "auto"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  models_dir: "models"
+  outputs_dir: "outputs"
+  
+  # Temporal Resolution & Windows
+  raw_resolution_min: 15
+  resample_resolution: "1h"
+  min_intervals_per_hour: 3  # out of 4 for 15-minute readings
+  window_length_hours: 360    # 15 days input
+  forecast_horizon_hours: 72  # 3 days output
+  stride_train_hours: 1
+  stride_eval_hours: 24
+
+  # Chronological Train / Val / Test Split
+  split:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    buffer_hours: 72  # Blackout gap between splits to eliminate leakage
+
+  # Column Roles & Specifications
+  targets:
+    - "PM2.5"
+    - "PM10"
+  
+  gases:
+    - "NO"
+    - "NO2"
+    - "SO2"
+    - "CO"
+    - "OZONE"
+
+  weather:
+    - "RH"
+    - "AT"
+    - "WS"
+    - "WD"
+    - "SR"
+
+  optional_columns:
+    - "NH3"
+    - "RF"
+
+  drop_columns:
+    - "BP"
+    - "MH"
+
+  # Data Quality & Cleaning Thresholds
+  cleaning:
+    pm25_max: 1000.0
+    pm10_max: 2000.0
+    pm_min: 0.0
+    flatline_hours: 6          # Consecutive identical hours flagged as stuck sensor
+    ratio_anomaly_threshold: 1.10  # PM2.5 > 1.10 * PM10 is flagged
+    short_gap_hours: 3        # Linear interpolation
+    medium_gap_hours: 24      # Diurnal / time-of-day seasonal interpolation
+    large_gap_hours: 24       # >24h stays missing, windows excluded
+
+  # Minimum Station Requirements
+  min_stations_required: 3
+  min_days_per_station: 365
+  target_days_per_station: 730
+  min_valid_hours_pct: 70.0
+
+stations:
+  default_list:
+    - "Rampur, Korba - CECB"
+  embedding_dim: 8
+
+model:
+  architecture: "Conv1D_BiLSTM"
+  conv1d:
+    filters: 64
+    kernel_size: 3
+    activation: "relu"
+  bilstm:
+    hidden_dim: 128
+    dropout: 0.2
+  lstm:
+    hidden_dim: 64
+    dropout: 0.2
+  attention:
+    enabled: false  # toggled on if validation improves
+  
+  # Quantiles (10th percentile, 50th/median, 90th percentile)
+  quantiles: [0.10, 0.50, 0.90]
+  
+  # Training Hyperparameters
+  loss:
+    name: "weighted_pinball_loss"
+    high_pollution_penalty_multiplier: 2.0  # Extra weight on Poor/Very Poor/Severe
+  optimizer:
+    name: "Adam"
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    lr_factor: 0.5
+    lr_patience: 4
+    min_lr: 0.00001
+  training:
+    batch_size: 64
+    max_epochs: 100
+    early_stopping_patience: 10
+    gradient_clip_norm: 1.0
+
+conformal:
+  target_coverage: 0.80
+  coverage_min_acceptable: 0.70
+  coverage_max_acceptable: 0.90
+
+aqi:
+  pollutants:
+    PM2.5:
+      breakpoints: [0, 30, 60, 90, 120, 250, 500]
+      index_ranges: [[0, 50], [51, 100], [101, 200], [201, 300], [301, 400], [401, 500]]
+    PM10:
+      breakpoints: [0, 50, 100, 250, 350, 430, 600]
+      index_ranges: [[0, 50], [51, 100], [101, 200], [201, 300], [301, 400], [401, 500]]
+  categories:
+    - { name: "Good", min: 0, max: 50, color: "#2ECC71" }
+    - { name: "Satisfactory", min: 51, max: 100, color: "#82E0AA" }
+    - { name: "Moderate", min: 101, max: 200, color: "#F4D03F" }
+    - { name: "Poor", min: 201, max: 300, color: "#E67E22" }
+    - { name: "Very Poor", min: 301, max: 400, color: "#E74C3C" }
+    - { name: "Severe", min: 401, max: 500, color: "#922B21" }
+
+dashboard:
+  model_max_age_days: 30
+  inference_timeout_seconds: 5.0

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# PyTest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model checkpoints & large binary dumps (keep directory structure)
+models/*.pt
+models/*.keras
+models/*.h5
+models/*.pkl
+models/*.joblib
+!models/.gitkeep
+
+# Data (keep raw sample but ignore large datasets)
+data/processed/*
+!data/processed/.gitkeep
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/

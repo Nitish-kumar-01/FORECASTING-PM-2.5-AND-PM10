@@ -1,0 +1,60 @@
+{
+  "disclaimer_en": "This is general guidance, not medical advice. People with heart or lung conditions should follow their doctor's advice.",
+  "disclaimer_hi": "यह सामान्य मार्गदर्शन है, चिकित्सा सलाह नहीं। हृदय या फेफड़ों की बीमारी वाले व्यक्तियों को अपने डॉक्टर की सलाह का पालन करना चाहिए।",
+  "precautions": {
+    "Good": {
+      "aqi_range": "0 - 50",
+      "color": "#2ECC71",
+      "general_public_en": "Normal outdoor activity. Keep windows open for natural ventilation.",
+      "general_public_hi": "सामान्य बाहरी गतिविधियाँ कर सकते हैं। ताज़ी हवा के लिए खिड़कियाँ खुली रखें।",
+      "sensitive_groups_en": "No restrictions. Enjoy outdoor activities.",
+      "sensitive_groups_hi": "कोई पाबंदी नहीं। सामान्य बाहरी गतिविधियों का आनंद लें।"
+    },
+    "Satisfactory": {
+      "aqi_range": "51 - 100",
+      "color": "#82E0AA",
+      "general_public_en": "Normal outdoor activity is acceptable.",
+      "general_public_hi": "सामान्य बाहरी गतिविधियाँ जारी रखी जा सकती हैं।",
+      "sensitive_groups_en": "Unusually sensitive individuals should monitor for cough or minor breathlessness during prolonged outdoor exertion.",
+      "sensitive_groups_hi": "अत्यधिक संवेदनशील लोग लंबे समय तक बाहर रहने पर खाँसी या हल्की साँस फूलने पर ध्यान दें।"
+    },
+    "Moderate": {
+      "aqi_range": "101 - 200",
+      "color": "#F4D03F",
+      "general_public_en": "Reduce prolonged heavy outdoor exertion. Keep windows closed during high dust hours.",
+      "general_public_hi": "लंबे समय तक भारी बाहरी व्यायाम कम करें। धूल भरे घंटों में खिड़कियाँ बंद रखें।",
+      "sensitive_groups_en": "Limit prolonged outdoor exertion. Keep prescribed rescue medications handy. Consider a mask in dusty areas.",
+      "sensitive_groups_hi": "बाहरी व्यायाम सीमित करें। आवश्यक दवाइयाँ साथ रखें। धूल भरे इलाकों में मास्क पहनने पर विचार करें।"
+    },
+    "Poor": {
+      "aqi_range": "201 - 300",
+      "color": "#E67E22",
+      "general_public_en": "Avoid heavy outdoor exertion. Wear a well-fitted N95/FFP2 mask when going outdoors. Run indoor air purifiers if available.",
+      "general_public_hi": "भारी बाहरी व्यायाम से बचें। बाहर निकलते समय अच्छी तरह फिट होने वाला N95/FFP2 मास्क पहनें। यदि संभव हो तो इनडोर एयर प्यूरीफायर चलाएँ।",
+      "sensitive_groups_en": "Stay indoors as much as possible. Postpone outdoor sports, school training, and heavy exertion.",
+      "sensitive_groups_hi": "यथासंभव घर के अंदर रहें। बाहरी खेलकूद और अधिक मेहनत वाली गतिविधियों को स्थगित करें।"
+    },
+    "Very Poor": {
+      "aqi_range": "301 - 400",
+      "color": "#E74C3C",
+      "general_public_en": "Avoid outdoor activities, especially in the early morning and late evening. Wear an N95 mask for necessary travel. Keep windows closed. Avoid burning waste or raising dust.",
+      "general_public_hi": "सुबह और देर शाम बाहरी गतिविधियों से पूरी तरह बचें। आवश्यक यात्रा के लिए N95 मास्क पहनें। खिड़की-दरवाजे बंद रखें। कचरा जलाने या धूल उड़ाने से बचें।",
+      "sensitive_groups_en": "Strictly remain indoors. Contact a medical professional immediately if experiencing cough, wheezing, chest tightness, or breathing difficulties.",
+      "sensitive_groups_hi": "सख्ती से घर के अंदर रहें। खाँसी, घरघराहट, सीने में जकड़न या साँस लेने में तकलीफ होने पर तुरंत डॉक्टर से संपर्क करें।"
+    },
+    "Severe": {
+      "aqi_range": "401 - 500+",
+      "color": "#922B21",
+      "general_public_en": "Stay indoors. Strictly avoid outdoor exercise. Wear an N95 mask for any unavoidable trip outside. Run air purification in a closed room.",
+      "general_public_hi": "घर के अंदर रहें। बाहरी व्यायाम बिल्कुल न करें। किसी भी अनिवार्य काम के लिए N95 मास्क पहनें। बंद कमरे में एयर प्यूरीफायर चलाएँ।",
+      "sensitive_groups_en": "Avoid all outdoor exposure. Individuals with asthma or heart conditions must remain in clean, filtered indoor air and seek early medical attention for any discomfort.",
+      "sensitive_groups_hi": "बाहरी वातावरण से पूरी तरह बचें। अस्थमा या हृदय रोगी साफ हवा वाले कमरे में रहें और किसी भी असहजता पर तुरंत चिकित्सा सहायता लें।"
+    }
+  },
+  "hourly_spike_alert": {
+    "title_en": "HIGH POLLUTION PEAK WARNING",
+    "title_hi": "उच्च प्रदूषण चेतावनी (पीक ऑवर)",
+    "message_en": "One or more individual hours in the 72-hour forecast are predicted to exceed the VERY POOR or SEVERE threshold. Take precautionary measures during peak periods even if the daily average is lower.",
+    "message_hi": "अगले 72 घंटों में एक या अधिक घंटों के दौरान प्रदूषण 'बहुत खराब' या 'गंभीर' स्तर तक पहुँचने का अनुमान है। दैनिक औसत कम होने पर भी पीक घंटों के दौरान सतर्कता बरतें।"
+  }
+}

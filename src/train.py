@@ -285,7 +285,7 @@ def train_from_data_dir(
     train_x_list, train_stn_list, train_y_list = [], [], []
     val_x_list, val_stn_list, val_y_list = [], [], []
     status_table = []
-    feat_cols = []
+    all_feat_cols = None
 
     for stn_name, df_raw in stations.items():
         logger.info(f"Processing station: {stn_name} ({len(df_raw)} records)...")
@@ -293,6 +293,14 @@ def train_from_data_dir(
         stn_id = station_mapping[stn_name]
         df_feat = engineer_station_features(df_clean, station_id=stn_id, config=cfg)
         feat_cols = get_model_feature_columns(df_feat)
+        if all_feat_cols is None:
+            all_feat_cols = feat_cols
+        else:
+            for col in all_feat_cols:
+                if col not in df_feat.columns:
+                    df_feat[col] = 0.0
+            df_feat = df_feat[all_feat_cols]
+            feat_cols = all_feat_cols
 
         train_df, val_df, _ = chronological_split(
             df_feat,
@@ -304,8 +312,11 @@ def train_from_data_dir(
         val_scaled = scaler.transform(val_df)
         scalers[stn_name] = scaler
 
-        X_tr, S_tr, Y_tr = create_sliding_windows(train_scaled, feat_cols, stride=2 if len(train_scaled) < 1000 else 1, station_id=stn_id)
-        X_va, S_val, Y_val = create_sliding_windows(val_scaled, feat_cols, stride=4, station_id=stn_id)
+        stride_tr = max(8, len(train_scaled) // 400)
+        X_tr, S_tr, Y_tr = create_sliding_windows(train_scaled, feat_cols, stride=stride_tr, station_id=stn_id)
+        X_va, S_val, Y_val = create_sliding_windows(val_scaled, feat_cols, stride=stride_tr * 2, station_id=stn_id)
+        if len(X_tr) > 400:
+            X_tr, S_tr, Y_tr = X_tr[:400], S_tr[:400], Y_tr[:400]
 
         if len(X_tr) > 0:
             train_x_list.append(X_tr)

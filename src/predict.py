@@ -72,7 +72,7 @@ def validate_input_data(
     if time_span < (required_hours * 0.80):
         warnings.append(
             f"Insufficient time span: {time_span:.1f} hours provided "
-            f"(expected ~{required_hours} hours / 15 days)."
+            f"(expected at least ~{required_hours} hours / 15 to 30 days)."
         )
 
     # 3. Staleness check
@@ -131,31 +131,46 @@ def run_forecast_pipeline(
     for col in feature_names:
         if col not in df_feat.columns:
             df_feat[col] = 0.0  # Safe zero imputation for missing optional features
-    df_feat = df_feat[feature_names]
+    df_feat = df_feat[feature_names].ffill().bfill().fillna(0.0)
 
-    # 4. Scaling
+    # 4. Adaptive Regime Scaling
+    # Check if station has a trained scaler, or if we should fit an adaptive local scaler.
+    # If the station is unseen, or if the station's recent observed mean differs from the
+    # trained scaler's target mean significantly (shift > 0.6 in log space, i.e. >1.8x linear),
+    # use an adaptive local scaler fitted on the input data so predictions remain strictly
+    # anchored to the actual pollution regime of the uploaded station (e.g. Delhi vs Korba).
     scaler = scalers.get(station_name)
-    if scaler is not None and scaler.is_fitted:
-        df_scaled = scaler.transform(df_feat)
-    else:
-        # Fallback to first available scaler
-        fallback_scaler = next(iter(scalers.values())) if scalers else None
-        if fallback_scaler:
-            df_scaled = fallback_scaler.transform(df_feat)
-            warnings.append(f"Using fallback scaler parameters for station '{station_name}'.")
-        else:
-            df_scaled = df_feat
+    use_local_scaler = False
 
-    # 5. Extract latest 360-hour window
-    if len(df_scaled) < 360:
-        # Pad beginning if slightly under 360h
-        pad_len = 360 - len(df_scaled)
-        pad_rows = pd.DataFrame(
-            np.tile(df_scaled.iloc[0].values, (pad_len, 1)),
-            columns=df_scaled.columns,
+    if scaler is not None and scaler.is_fitted:
+        for t_col in target_names:
+            if t_col in df_feat.columns:
+                obs_log_mean = float(np.log1p(np.maximum(0.0, df_feat[t_col])).mean())
+                train_log_mean = float(scaler.mean_.get(t_col, obs_log_mean))
+                if abs(obs_log_mean - train_log_mean) > 0.6:
+                    use_local_scaler = True
+                    break
+    else:
+        use_local_scaler = True
+
+    if use_local_scaler:
+        from src.data.windows import StationScaler
+        active_scaler = StationScaler(target_cols=target_names).fit(df_feat)
+        df_scaled = active_scaler.transform(df_feat)
+        warnings.append(
+            f"Fitted adaptive local scaler for station '{station_name}' to preserve true baseline regime."
         )
-        df_scaled_window = pd.concat([pad_rows, df_scaled], axis=0).iloc[-360:]
-        warnings.append(f"Recent data had {len(df_scaled)} hours; padded initial {pad_len} hours for inference.")
+    else:
+        active_scaler = scaler
+        df_scaled = active_scaler.transform(df_feat)
+
+    # 5. Extract latest 360-hour window with Cyclical Extension
+    if len(df_scaled) < 360:
+        # Cyclically tile observed data backwards so the LSTM encoder sees realistic diurnal dynamics
+        # rather than a static single repeated row
+        reps = int(np.ceil(360 / len(df_scaled)))
+        df_scaled_window = pd.concat([df_scaled] * reps, axis=0).iloc[-360:]
+        warnings.append(f"Recent data had {len(df_scaled)} hours; cyclically extended to 360h for inference.")
     else:
         df_scaled_window = df_scaled.iloc[-360:]
 
@@ -181,19 +196,50 @@ def run_forecast_pipeline(
         q_pred_np = np.stack([q10_cal, q50, q90_cal], axis=-1)
 
     # 8. Inverse Transform back to Physical Units (ug/m3)
-    active_scaler = scaler or fallback_scaler
     if active_scaler:
         y_physical = active_scaler.inverse_transform_targets(q_pred_np)
     else:
         y_physical = np.maximum(0.0, q_pred_np)
 
-    # 9. Build Future Timestamps
+    # 8.5 Diurnal Profile Modulation & Smooth Boundary Continuity
+    # Recreates observed day/night cycles (morning/night peaks, afternoon troughs)
     latest_ts = df_clean_hourly.index[-1]
     future_timestamps = pd.date_range(
         start=latest_ts + pd.Timedelta(hours=1),
         periods=72,
         freq="1h",
     )
+
+    for i, col in enumerate(target_names):
+        if col in df_clean_hourly.columns:
+            series = df_clean_hourly[col].dropna()
+            if len(series) >= 12 and series.mean() > 0:
+                hourly_means = series.groupby(series.index.hour).mean()
+                overall_mean = float(series.mean())
+                diurnal_mult = (hourly_means / overall_mean).to_dict()
+
+                # Apply diurnal multipliers across 72 hours
+                for step_idx, ts in enumerate(future_timestamps):
+                    h = ts.hour
+                    mult = diurnal_mult.get(h, 1.0)
+                    # Blend gently over 3 days (1.0 on day 1, down to 0.7 on day 3)
+                    blend = max(0.65, 1.0 - (step_idx / 72.0) * 0.35)
+                    eff_mult = 1.0 + blend * (mult - 1.0)
+                    y_physical[step_idx, i, :] = y_physical[step_idx, i, :] * eff_mult
+
+                # Smooth exponential continuity transition from last observed concentration
+                last_obs = float(series.iloc[-1])
+                pred_t0 = float(y_physical[0, i, 1])  # median at t=0
+                gap = last_obs - pred_t0
+                for step_idx in range(min(12, len(future_timestamps))):
+                    smooth_weight = np.exp(-step_idx / 2.5)
+                    y_physical[step_idx, i, :] += gap * smooth_weight
+
+    # Enforce non-negativity and strictly non-crossing quantiles: q10 <= q50 <= q90
+    y_physical = np.maximum(0.0, y_physical)
+    for i in range(len(target_names)):
+        for step_idx in range(len(future_timestamps)):
+            y_physical[step_idx, i, :] = np.sort(y_physical[step_idx, i, :])
 
     # 10. Compute CPCB AQI and Health Advisories
     daily_results = evaluate_daily_aqi_forecast(y_physical, target_names=target_names)

@@ -78,30 +78,51 @@ def parse_cpcb_header(file_path: Union[str, Path]) -> Tuple[StationMetadata, int
         preview_df = pd.read_csv(path, nrows=25, header=None)
 
     for idx, row in preview_df.iterrows():
-        row_str = " ".join([str(val) for val in row.values if pd.notna(val)])
-        
-        # Extract Station Name
-        stn_match = re.search(r"(?:Station|Station Name)\s*[:=-]\s*([^,\n\r]+(?:,\s*[^,\n\r]+)?)", row_str, re.IGNORECASE)
-        if stn_match:
-            station_name = stn_match.group(1).strip()
-            
-        # Extract City
-        city_match = re.search(r"City\s*[:=-]\s*([a-zA-Z\s]+)", row_str, re.IGNORECASE)
-        if city_match:
-            city = city_match.group(1).strip()
-            
-        # Extract State
-        state_match = re.search(r"State\s*[:=-]\s*([a-zA-Z\s]+)", row_str, re.IGNORECASE)
-        if state_match:
-            state = state_match.group(1).strip()
-            
-        # Extract Avg Period
-        avg_match = re.search(r"(?:AvgPeriod|Average Period|Interval)\s*[:=-]\s*([^\s,]+(?:\s+[^\s,]+)?)", row_str, re.IGNORECASE)
-        if avg_match:
-            avg_period = avg_match.group(1).strip()
+        cells = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() not in ("", "nan")]
+        row_str = " ".join(cells)
+
+        # 1. Inspect cell-by-cell first
+        for c_idx, cell in enumerate(cells):
+            # Station Name
+            if re.match(r"^(?:Station|Station Name)\b", cell, re.IGNORECASE):
+                val_match = re.search(r"^(?:Station|Station Name)\s*[:=-]?\s*(.+)$", cell, re.IGNORECASE)
+                if val_match and val_match.group(1).strip():
+                    station_name = val_match.group(1).strip()
+                elif c_idx + 1 < len(cells):
+                    station_name = cells[c_idx + 1].strip()
+
+            # City
+            if re.match(r"^City\b", cell, re.IGNORECASE):
+                val_match = re.search(r"^City\s*[:=-]?\s*(.+)$", cell, re.IGNORECASE)
+                if val_match and val_match.group(1).strip():
+                    city = val_match.group(1).strip()
+                elif c_idx + 1 < len(cells):
+                    city = cells[c_idx + 1].strip()
+
+            # State
+            if re.match(r"^State\b", cell, re.IGNORECASE):
+                val_match = re.search(r"^State\s*[:=-]?\s*(.+)$", cell, re.IGNORECASE)
+                if val_match and val_match.group(1).strip():
+                    state = val_match.group(1).strip()
+                elif c_idx + 1 < len(cells):
+                    state = cells[c_idx + 1].strip()
+
+            # Avg Period
+            if re.match(r"^(?:AvgPeriod|Average Period|Interval)\b", cell, re.IGNORECASE):
+                val_match = re.search(r"^(?:AvgPeriod|Average Period|Interval)\s*[:=-]?\s*(.+)$", cell, re.IGNORECASE)
+                if val_match and val_match.group(1).strip():
+                    avg_period = val_match.group(1).strip()
+                elif c_idx + 1 < len(cells):
+                    avg_period = cells[c_idx + 1].strip()
+
+        # 2. Fallback regex on row_str if not already matched
+        if station_name == path.stem:
+            stn_match = re.search(r"(?:Station|Station Name)\s*[:=-]?\s*([^,\n\r]+(?:,\s*[^,\n\r]+)?)", row_str, re.IGNORECASE)
+            if stn_match and stn_match.group(1).strip():
+                station_name = stn_match.group(1).strip()
 
         # Identify data header row (typically contains 'From Date' and 'To Date')
-        if any(re.search(r"from\s*date", str(v), re.IGNORECASE) for v in row.values if pd.notna(v)):
+        if any(re.search(r"from\s*date", c, re.IGNORECASE) for c in cells):
             data_header_row = int(idx)
             break
 

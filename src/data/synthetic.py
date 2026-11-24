@@ -34,7 +34,7 @@ def generate_station_data(
 
     # Time factors
     hours = timestamps.hour + timestamps.minute / 60.0
-    day_of_year = getattr(timestamps, "day_of_year", getattr(timestamps, "dayofyear", None))
+    day_of_year = timestamps.day_of_year if hasattr(timestamps, "day_of_year") else timestamps.dayofyear
     
     # 1. Weather Simulation (Korba: hot summers, wet monsoons, dry/cool winters)
     # Ambient Temperature: Annual range (15 to 42 C), Diurnal range (8 to 15 C)

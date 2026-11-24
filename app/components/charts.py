@@ -38,11 +38,12 @@ def create_72h_forecast_plot(
     station_name: str = "Rampur, Korba - CECB",
 ) -> go.Figure:
     """
-    Creates an interactive Plotly visualization for a 72-hour forecast:
-    - Shaded background rectangles for CPCB AQI categories
-    - Historical observed readings (last 48h) in dark gray
-    - Median forecast line in bold color
-    - 10th to 90th percentile calibrated uncertainty shaded region
+    Creates an interactive Plotly visualization displaying:
+    - Complete uploaded historical timeline (all 15 days or 30 days uploaded)
+    - Seamless continuous transition into the next 3 days (72-hour) forecast line
+    - Calibrated 10th-to-90th percentile prediction intervals
+    - CPCB regulatory colored background bands
+    - Interactive date range selectors (3 Days, 7 Days, 15 Days, All) & range slider
     """
     fig = go.Figure()
 
@@ -51,7 +52,7 @@ def create_72h_forecast_plot(
     q50 = y_quantiles[:, target_idx, 1]
     q90 = y_quantiles[:, target_idx, 2]
 
-    # Determine y-axis maximum
+    # Determine y-axis maximum across historical observations and predicted quantiles
     max_val = max(float(np.max(q90)) * 1.15, 150.0)
     if historical_df is not None and target_name in historical_df.columns:
         hist_max = historical_df[target_name].dropna().max()
@@ -74,25 +75,44 @@ def create_72h_forecast_plot(
             annotation_font=dict(size=10, color=border_col),
         )
 
-    # 2. Add Historical Past Observations if provided
+    # 2. Add Complete Uploaded Historical Data (Full 15-day / 30-day uploaded dataset)
+    last_hist_ts = None
+    last_hist_val = None
     if historical_df is not None and target_name in historical_df.columns:
-        hist_slice = historical_df.iloc[-48:]  # Last 48 hours
-        fig.add_trace(
-            go.Scatter(
-                x=hist_slice.index,
-                y=hist_slice[target_name],
-                mode="lines+markers",
-                name="Observed History",
-                line=dict(color="#34495E", width=2),
-                marker=dict(size=4),
+        hist_clean = historical_df[target_name].dropna()
+        if len(hist_clean) > 0:
+            last_hist_ts = hist_clean.index[-1]
+            last_hist_val = float(hist_clean.iloc[-1])
+            days_span = (hist_clean.index.max() - hist_clean.index.min()).total_seconds() / 86400.0
+            hist_label = f"Uploaded Observed History ({days_span:.1f} Days, {len(hist_clean)} Records)"
+            fig.add_trace(
+                go.Scatter(
+                    x=hist_clean.index,
+                    y=hist_clean.values,
+                    mode="lines",
+                    name=hist_label,
+                    line=dict(color="#2C3E50", width=2),
+                    hovertemplate="<b>Observed: %{x|%d %b %H:%M}</b><br>Concentration: %{y:.1f} ug/m3<extra></extra>",
+                )
             )
-        )
 
-    # 3. Add Uncertainty Envelope: q90 top line, then q10 bottom line with fill
+    # 3. Seamless connection: anchor forecast line to last observed point
+    if last_hist_ts is not None and last_hist_val is not None:
+        fc_x = [last_hist_ts] + list(future_timestamps)
+        fc_q10 = [last_hist_val] + list(q10)
+        fc_q50 = [last_hist_val] + list(q50)
+        fc_q90 = [last_hist_val] + list(q90)
+    else:
+        fc_x = list(future_timestamps)
+        fc_q10 = list(q10)
+        fc_q50 = list(q50)
+        fc_q90 = list(q90)
+
+    # 4. Uncertainty Envelope (10th to 90th percentile)
     fig.add_trace(
         go.Scatter(
-            x=future_timestamps,
-            y=q90,
+            x=fc_x,
+            y=fc_q90,
             mode="lines",
             line=dict(width=0),
             showlegend=False,
@@ -101,8 +121,8 @@ def create_72h_forecast_plot(
     )
     fig.add_trace(
         go.Scatter(
-            x=future_timestamps,
-            y=q10,
+            x=fc_x,
+            y=fc_q10,
             mode="lines",
             line=dict(width=0),
             fill="tonexty",
@@ -112,33 +132,75 @@ def create_72h_forecast_plot(
         )
     )
 
-    # 4. Add Median Forecast Line
+    # 5. Continuous Median Forecast Line (Next 3 Days)
     fig.add_trace(
         go.Scatter(
-            x=future_timestamps,
-            y=q50,
+            x=fc_x,
+            y=fc_q50,
             mode="lines+markers",
-            name=f"Median Forecast ({target_name})",
-            line=dict(color="#2980B9", width=3),
-            marker=dict(size=5, symbol="circle"),
-            hovertemplate="<b>%{x|%d %b %H:%M}</b><br>Forecast: %{y:.1f} ug/m3<extra></extra>",
+            name=f"Next 3 Days Forecast ({target_name})",
+            line=dict(color="#2980B9", width=3.5),
+            marker=dict(size=4, symbol="circle"),
+            hovertemplate="<b>Forecast: %{x|%d %b %H:%M}</b><br>Predicted: %{y:.1f} ug/m3<extra></extra>",
         )
     )
 
-    # 5. Day separation vertical dashed lines
-    if len(future_timestamps) >= 48:
-        fig.add_vline(x=future_timestamps[23].timestamp() * 1000, line_dash="dash", line_color="#7F8C8D", line_width=1)
-        fig.add_vline(x=future_timestamps[47].timestamp() * 1000, line_dash="dash", line_color="#7F8C8D", line_width=1)
+    # 6. Add Forecast Start Divider Line & Day Separation Lines
+    if last_hist_ts is not None:
+        fig.add_vline(
+            x=last_hist_ts.isoformat(),
+            line_dash="solid",
+            line_color="#2C3E50",
+            line_width=2,
+            annotation_text=" 🔮 Next 3 Days Forecast Starts",
+            annotation_position="top left",
+            annotation_font=dict(size=11, color="#2C3E50"),
+        )
 
+    if len(future_timestamps) >= 24:
+        fig.add_vline(
+            x=future_timestamps[23].isoformat(),
+            line_dash="dot",
+            line_color="#7F8C8D",
+            line_width=1,
+            annotation_text=" End Day+1",
+            annotation_position="bottom right",
+            annotation_font=dict(size=9, color="#7F8C8D"),
+        )
+    if len(future_timestamps) >= 48:
+        fig.add_vline(
+            x=future_timestamps[47].isoformat(),
+            line_dash="dot",
+            line_color="#7F8C8D",
+            line_width=1,
+            annotation_text=" End Day+2",
+            annotation_position="bottom right",
+            annotation_font=dict(size=9, color="#7F8C8D"),
+        )
+
+    # 7. Layout with Range Selector Buttons & Range Slider for 15/30-day navigation
     fig.update_layout(
         title=dict(
-            text=f"<b>72-Hour {target_name} Concentration Forecast</b> ({station_name})",
+            text=f"<b>Complete Observation History & 72-Hour {target_name} Forecast</b> ({station_name})",
             font=dict(size=16),
         ),
         xaxis=dict(
             title="Date & Time (IST)",
             showgrid=True,
             gridcolor="#E5E8E8",
+            type="date",
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=3, label="Forecast Focus (3 Days)", step="day", stepmode="backward"),
+                    dict(count=7, label="Last 7 Days + Forecast", step="day", stepmode="backward"),
+                    dict(count=15, label="Last 15 Days + Forecast", step="day", stepmode="backward"),
+                    dict(count=30, label="Last 1 Month + Forecast", step="day", stepmode="backward"),
+                    dict(step="all", label="Full History (All)"),
+                ]),
+                bgcolor="#EAEDED",
+                activecolor="#2980B9",
+            ),
+            rangeslider=dict(visible=True, thickness=0.07),
         ),
         yaxis=dict(
             title=f"{target_name} Concentration (ug/m3)",
@@ -150,12 +212,12 @@ def create_72h_forecast_plot(
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=1.02,
+            y=1.03,
             xanchor="right",
             x=1,
         ),
-        margin=dict(l=40, r=40, t=60, b=40),
-        height=480,
+        margin=dict(l=40, r=40, t=65, b=40),
+        height=520,
     )
 
     return fig

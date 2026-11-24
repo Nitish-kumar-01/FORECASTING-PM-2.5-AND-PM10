@@ -27,12 +27,12 @@ def add_cyclical_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df_feat["hour_cos"] = np.cos(2.0 * np.pi * hour / 24.0)
 
     # Day of week (period = 7)
-    dayofweek = getattr(idx, "day_of_week", getattr(idx, "dayofweek", None))
+    dayofweek = idx.day_of_week if hasattr(idx, "day_of_week") else idx.dayofweek
     df_feat["dayofweek_sin"] = np.sin(2.0 * np.pi * dayofweek / 7.0)
     df_feat["dayofweek_cos"] = np.cos(2.0 * np.pi * dayofweek / 7.0)
 
     # Day of year (period = 365.25)
-    doy = getattr(idx, "day_of_year", getattr(idx, "dayofyear", None))
+    doy = idx.day_of_year if hasattr(idx, "day_of_year") else idx.dayofyear
     df_feat["dayofyear_sin"] = np.sin(2.0 * np.pi * doy / 365.25)
     df_feat["dayofyear_cos"] = np.cos(2.0 * np.pi * doy / 365.25)
 

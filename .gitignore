@@ -17,17 +17,28 @@ ENV/
 .coverage
 htmlcov/
 
-# Model checkpoints & large binary dumps (keep directory structure)
+# Model checkpoints & large binary dumps (keep directory structure and pre-trained package)
 models/*.pt
+!models/model_package.pt
 models/*.keras
 models/*.h5
 models/*.pkl
 models/*.joblib
 !models/.gitkeep
 
-# Data (keep raw sample but ignore large datasets)
+# Data (keep raw sample but ignore large datasets & uploads)
 data/processed/*
 !data/processed/.gitkeep
+data/raw/user_uploads/*
+!data/raw/user_uploads/.gitkeep
+
+# Generated output artifacts
+outputs/forecasts/*
+!outputs/forecasts/.gitkeep
+outputs/reports/*
+!outputs/reports/.gitkeep
+outputs/alerts/*
+!outputs/alerts/.gitkeep
 
 # OS / Editor
 .DS_Store
@@ -35,4 +46,5 @@ data/processed/*
 .idea/
 
 # Streamlit
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
